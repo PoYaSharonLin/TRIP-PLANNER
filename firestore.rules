@@ -1,0 +1,65 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function validTrip(d) {
+      return d.keys().hasOnly(['startDate', 'timezone'])
+        && d.startDate is string
+        && d.startDate.matches('^[0-9]{4}-[0-9]{2}-[0-9]{2}$')
+        && d.timezone is string
+        && d.timezone.size() <= 64;
+    }
+
+    function optString(d, key, max) {
+      return !(key in d) || (d[key] is string && d[key].size() <= max);
+    }
+
+    function optUrl(d, key) {
+      return !(key in d)
+        || (d[key] is string
+            && d[key].size() <= 500
+            && d[key].matches('^https?://.+'));
+    }
+
+    function validItem(d) {
+      return d.keys().hasAll(['day', 'order', 'title', 'status', 'updatedAt'])
+        && d.keys().hasOnly(['day', 'order', 'title', 'status',
+             'startTime', 'durationMin', 'mapUrl', 'category', 'note',
+             'bookingUrl', 'cost', 'updatedAt', 'updatedBy'])
+        && (d.day == null || (d.day is int && d.day >= 1 && d.day <= 60))
+        && d.order is string && d.order.size() <= 100
+        && d.title is string && d.title.size() > 0 && d.title.size() <= 100
+        && d.status in ['planned', 'done', 'skipped']
+        && d.updatedAt == request.time
+        && (!('startTime' in d)
+            || (d.startTime is string
+                && d.startTime.matches('^([01][0-9]|2[0-3]):[0-5][0-9]$')))
+        && (!('durationMin' in d)
+            || (d.durationMin is int && d.durationMin > 0 && d.durationMin <= 1440))
+        && (!('category' in d)
+            || d.category in ['spot', 'food', 'transport', 'stay'])
+        && (!('cost' in d) || d.cost is number)
+        && optString(d, 'note', 2000)
+        && optString(d, 'updatedBy', 20)
+        && optUrl(d, 'mapUrl')
+        && optUrl(d, 'bookingUrl');
+    }
+
+    match /trips/{tripId} {
+      allow get: if signedIn();
+      allow list: if false;
+      allow create, update: if signedIn() && validTrip(request.resource.data);
+      allow delete: if false;
+
+      match /items/{itemId} {
+        allow read: if signedIn();
+        allow create, update: if signedIn() && validItem(request.resource.data);
+        allow delete: if signedIn();
+      }
+    }
+  }
+}
